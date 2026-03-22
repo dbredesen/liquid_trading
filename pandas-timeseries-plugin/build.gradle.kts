@@ -24,7 +24,6 @@ dependencies {
     intellijPlatform {
         pycharmCommunity(providers.gradleProperty("platformVersion").get())
         bundledPlugin("PythonCore")
-        instrumentationTools()
         testFramework(TestFrameworkType.Platform)
     }
 
