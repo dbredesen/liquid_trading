@@ -15,6 +15,8 @@ import com.intellij.xdebugger.XDebuggerManagerListener
 import com.intellij.xdebugger.XDebugSession
 import com.pandasplot.debugger.DataFrameEvaluator
 import com.pandasplot.debugger.DataFrameInfo
+import com.pandasplot.debugger.X_AXIS_INDEX
+import com.pandasplot.debugger.X_AXIS_ROWNUM
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import javax.swing.JButton
@@ -195,8 +197,11 @@ private class EmbeddedColumnSelectorPanel(
     private fun populate(df: DataFrameInfo) {
         currentDf = df
         xAxisCombo.removeAllItems()
-        (df.timestampColumns + df.columns.filter { it !in df.timestampColumns })
-            .forEach { xAxisCombo.addItem(it) }
+        xAxisCombo.addItem(X_AXIS_ROWNUM)
+        if (df.isIndexDateTime) {
+            xAxisCombo.addItem(X_AXIS_INDEX)
+        }
+        df.timestampColumns.forEach { xAxisCombo.addItem(it) }
 
         val model = com.intellij.ui.CollectionListModel(df.columns)
         yAxisList.model = model

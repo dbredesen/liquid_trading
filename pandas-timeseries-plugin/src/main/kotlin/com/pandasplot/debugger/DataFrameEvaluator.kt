@@ -145,6 +145,10 @@ class DataFrameEvaluator(private val project: Project) {
     /**
      * Extracts time series data from [dfName] for the given columns.
      * [timestampCol] will become the X axis; [seriesCols] become Y axis series.
+     *
+     * Special sentinel values for [timestampCol]:
+     * - [X_AXIS_ROWNUM] – use 0-based row number as X
+     * - [X_AXIS_INDEX]  – use the DataFrame's index as X
      */
     fun extractTimeSeriesData(
         dfName: String,
@@ -153,17 +157,36 @@ class DataFrameEvaluator(private val project: Project) {
     ): TimeSeriesData? {
         if (seriesCols.isEmpty()) return null
 
-        // Build a list of columns to extract, escaping names for safety
-        val allCols = (listOf(timestampCol) + seriesCols).joinToString(",") { "\"${it.escapeForPython()}\"" }
+        val yColsJson = seriesCols.joinToString(",") { "\"${it.escapeForPython()}\"" }
+        val nanHelper = "__import__('math').isnan(float(x))"
+        val seriesExpr = "{c: [None if $nanHelper else float(x) for x in df[c].fillna(float('nan'))] for c in cols}"
 
-        val script = """
-            (lambda df, cols: __import__('json').dumps({
-                'timestamps': df[cols[0]].astype(str).tolist(),
-                'series': {c: [None if __import__('math').isnan(float(x)) else float(x)
-                               for x in df[c].fillna(float('nan'))]
-                           for c in cols[1:]}
-            }))(${dfName}, [${allCols}])
-        """.trimIndent()
+        val script = when (timestampCol) {
+            X_AXIS_ROWNUM -> """
+                (lambda df, cols: __import__('json').dumps({
+                    'timestamps': [str(i) for i in range(len(df))],
+                    'series': $seriesExpr
+                }))(${dfName}, [${yColsJson}])
+            """.trimIndent()
+
+            X_AXIS_INDEX -> """
+                (lambda df, cols: __import__('json').dumps({
+                    'timestamps': df.index.astype(str).tolist(),
+                    'series': $seriesExpr
+                }))(${dfName}, [${yColsJson}])
+            """.trimIndent()
+
+            else -> {
+                val allCols = (listOf(timestampCol) + seriesCols)
+                    .joinToString(",") { "\"${it.escapeForPython()}\"" }
+                """
+                    (lambda df, cols: __import__('json').dumps({
+                        'timestamps': df[cols[0]].astype(str).tolist(),
+                        'series': {c: [None if $nanHelper else float(x) for x in df[c].fillna(float('nan'))] for c in cols[1:]}
+                    }))(${dfName}, [${allCols}])
+                """.trimIndent()
+            }
+        }
 
         val raw = evalSync(script) ?: return null
 
@@ -200,7 +223,8 @@ class DataFrameEvaluator(private val project: Project) {
                 'columns': df.columns.tolist(),
                 'dtypes': {c: str(t) for c, t in df.dtypes.items()},
                 'rows': len(df),
-                'shape': list(df.shape)
+                'shape': list(df.shape),
+                'index_dtype': str(df.index.dtype)
             }))(${name})
         """.trimIndent()
 
@@ -221,7 +245,8 @@ class DataFrameEvaluator(private val project: Project) {
                 columns = columns,
                 dtypes = dtypes,
                 rowCount = json.getInt("rows"),
-                shape = Pair(shapeArray.getInt(0), shapeArray.getInt(1))
+                shape = Pair(shapeArray.getInt(0), shapeArray.getInt(1)),
+                indexDtype = json.optString("index_dtype", "object")
             )
         } catch (e: Exception) {
             LOG.warn("Failed to parse DataFrame info for $name: $raw", e)

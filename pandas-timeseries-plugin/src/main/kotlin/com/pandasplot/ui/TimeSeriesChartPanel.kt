@@ -1,17 +1,22 @@
 package com.pandasplot.ui
 
 import com.pandasplot.debugger.TimeSeriesData
+import com.pandasplot.debugger.X_AXIS_INDEX
+import com.pandasplot.debugger.X_AXIS_ROWNUM
 import org.jfree.chart.ChartFactory
 import org.jfree.chart.ChartPanel
 import org.jfree.chart.JFreeChart
 import org.jfree.chart.axis.DateAxis
 import org.jfree.chart.axis.NumberAxis
+import org.jfree.chart.plot.PlotOrientation
 import org.jfree.chart.plot.XYPlot
 import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer
 import org.jfree.chart.ui.RectangleInsets
 import org.jfree.data.time.Millisecond
 import org.jfree.data.time.TimeSeries
 import org.jfree.data.time.TimeSeriesCollection
+import org.jfree.data.xy.XYSeries
+import org.jfree.data.xy.XYSeriesCollection
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.Dimension
@@ -52,6 +57,10 @@ private val TIMESTAMP_FORMATS = listOf(
 /**
  * A Swing panel that renders a JFreeChart time-series chart from [TimeSeriesData].
  * Supports zoom (mouse-wheel), pan, and crosshair tooltips out of the box via ChartPanel.
+ *
+ * When [TimeSeriesData.timestampColumn] is [X_AXIS_ROWNUM] the chart uses a plain
+ * numeric X axis (row number). For [X_AXIS_INDEX] or named datetime columns the
+ * standard date/time axis is used.
  */
 class TimeSeriesChartPanel : JPanel(BorderLayout()) {
 
@@ -66,11 +75,18 @@ class TimeSeriesChartPanel : JPanel(BorderLayout()) {
     // Public
     // ------------------------------------------------------------------
 
-    /** Render [data] as an interactive time series chart. */
+    /** Render [data] as an interactive chart. */
     fun plot(data: TimeSeriesData) {
-        val dataset = buildDataset(data)
-        val chart = buildChart(data.dfName, data.timestampColumn, dataset)
-        replaceChart(chart)
+        if (data.timestampColumn == X_AXIS_ROWNUM) {
+            val dataset = buildXYDataset(data)
+            val chart = buildXYChart(data.dfName, "Row", dataset)
+            replaceChart(chart)
+        } else {
+            val dataset = buildDataset(data)
+            val xLabel = if (data.timestampColumn == X_AXIS_INDEX) "Index" else data.timestampColumn
+            val chart = buildChart(data.dfName, xLabel, dataset)
+            replaceChart(chart)
+        }
     }
 
     /** Clear the chart area and show the placeholder message. */
@@ -107,6 +123,10 @@ class TimeSeriesChartPanel : JPanel(BorderLayout()) {
         repaint()
     }
 
+    // ------------------------------------------------------------------
+    // Date/time axis chart (named column or DataFrame index)
+    // ------------------------------------------------------------------
+
     private fun buildDataset(data: TimeSeriesData): TimeSeriesCollection {
         val collection = TimeSeriesCollection()
 
@@ -140,6 +160,43 @@ class TimeSeriesChartPanel : JPanel(BorderLayout()) {
         return chart
     }
 
+    // ------------------------------------------------------------------
+    // Numeric (row-number) axis chart
+    // ------------------------------------------------------------------
+
+    private fun buildXYDataset(data: TimeSeriesData): XYSeriesCollection {
+        val collection = XYSeriesCollection()
+
+        data.series.forEach { (colName, values) ->
+            val xySeries = XYSeries(colName)
+            data.timestamps.forEachIndexed { idx, tsStr ->
+                val x = tsStr.toDoubleOrNull() ?: idx.toDouble()
+                val y = values.getOrNull(idx) ?: return@forEachIndexed
+                xySeries.add(x, y)
+            }
+            collection.addSeries(xySeries)
+        }
+
+        return collection
+    }
+
+    private fun buildXYChart(title: String, xLabel: String, dataset: XYSeriesCollection): JFreeChart {
+        val chart = ChartFactory.createXYLineChart(
+            title, xLabel, "Value", dataset,
+            PlotOrientation.VERTICAL,
+            true,   // legend
+            true,   // tooltips
+            false   // URLs
+        )
+
+        styleChart(chart)
+        return chart
+    }
+
+    // ------------------------------------------------------------------
+    // Shared chart styling
+    // ------------------------------------------------------------------
+
     private fun styleChart(chart: JFreeChart) {
         chart.backgroundPaint = Color.WHITE
         chart.padding = RectangleInsets(8.0, 8.0, 8.0, 8.0)
@@ -151,11 +208,16 @@ class TimeSeriesChartPanel : JPanel(BorderLayout()) {
         plot.isOutlineVisible = false
         plot.insets = RectangleInsets(4.0, 4.0, 4.0, 4.0)
 
-        // Style axes
+        // Style the domain axis (DateAxis for time charts, NumberAxis for rownum)
         (plot.domainAxis as? DateAxis)?.apply {
             tickLabelFont = tickLabelFont.deriveFont(10f)
             labelFont = labelFont.deriveFont(11f)
             isVerticalTickLabels = true
+        }
+        (plot.domainAxis as? NumberAxis)?.apply {
+            tickLabelFont = tickLabelFont.deriveFont(10f)
+            labelFont = labelFont.deriveFont(11f)
+            autoRangeIncludesZero = false
         }
         (plot.rangeAxis as? NumberAxis)?.apply {
             tickLabelFont = tickLabelFont.deriveFont(10f)

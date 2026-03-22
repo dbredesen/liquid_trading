@@ -12,6 +12,8 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.pandasplot.debugger.DataFrameEvaluator
 import com.pandasplot.debugger.DataFrameInfo
+import com.pandasplot.debugger.X_AXIS_INDEX
+import com.pandasplot.debugger.X_AXIS_ROWNUM
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.FlowLayout
@@ -123,7 +125,7 @@ class PandasPlotDialog(
 
         // Row 1: X-axis column
         gc.gridx = 0; gc.gridy = 1; gc.weightx = 0.0
-        panel.add(JLabel("X axis (timestamp):"), gc)
+        panel.add(JLabel("X axis:"), gc)
         gc.gridx = 1; gc.weightx = 1.0
         panel.add(xAxisCombo, gc)
 
@@ -164,11 +166,16 @@ class PandasPlotDialog(
     private fun onDataFrameSelected(df: DataFrameInfo) {
         currentDf = df
 
-        // Populate X axis combo (prefer timestamp columns; show all as fallback)
+        // Populate X axis combo:
+        //   1. <rownum>  – always available
+        //   2. "DataFrame index" – when the index has a datetime dtype
+        //   3. Any column whose dtype is a datetime/timestamp type
         xAxisCombo.removeAllItems()
-        val preferred = df.timestampColumns
-        val rest = df.columns.filter { it !in preferred }
-        (preferred + rest).forEach { xAxisCombo.addItem(it) }
+        xAxisCombo.addItem(X_AXIS_ROWNUM)
+        if (df.isIndexDateTime) {
+            xAxisCombo.addItem(X_AXIS_INDEX)
+        }
+        df.timestampColumns.forEach { xAxisCombo.addItem(it) }
 
         // Populate Y axis list (default to numeric columns)
         val model = CollectionListModel(df.columns)
