@@ -29,7 +29,7 @@ repositories {
 
 dependencies {
     intellijPlatform {
-        pycharmCommunity(providers.gradleProperty("platformVersion").get())
+        pycharmProfessional(providers.gradleProperty("platformVersion").get())
         bundledPlugin("PythonCore")
         testFramework(TestFrameworkType.Platform)
     }
