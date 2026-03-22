@@ -5,12 +5,18 @@ import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.project.Project
 import com.intellij.xdebugger.XDebuggerManager
 import com.intellij.xdebugger.evaluation.XDebuggerEvaluator
+import com.intellij.xdebugger.frame.XCompositeNode
+import com.intellij.xdebugger.frame.XDebuggerTreeNodeHyperlink
+import com.intellij.xdebugger.frame.XStackFrame
 import com.intellij.xdebugger.frame.XValue
+import com.intellij.xdebugger.frame.XValueChildrenList
 import com.intellij.xdebugger.frame.XValueNode
 import com.intellij.xdebugger.frame.XValuePlace
+import com.intellij.xdebugger.frame.presentation.XValuePresentation
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import javax.swing.Icon
 
@@ -29,30 +35,106 @@ class DataFrameEvaluator(private val project: Project) {
     /**
      * Returns all Pandas DataFrames found in the current debugger frame's local scope.
      * Must be called from a background thread (does a blocking wait on the evaluator).
+     *
+     * Uses [XStackFrame.computeChildren] to enumerate variables directly from the
+     * debugger API instead of evaluating `locals()` inside a Python expression.
+     * This is necessary because PyCharm 2025.3's pydevd evaluates expressions in a
+     * sub-scope where `locals()` no longer reflects the stopped frame's variables.
      */
     fun findDataFrames(): List<DataFrameInfo> {
-        // Step 1: get all local variable names
-        val namesJson = evalSync(
-            """
-            __import__('json').dumps(
-                [k for k, v in locals().items()
-                 if not k.startswith('_')
-                 and type(v).__name__ == 'DataFrame'
-                 and hasattr(v, 'columns')]
-            )
-            """.trimIndent()
-        ) ?: return emptyList()
+        val session = XDebuggerManager.getInstance(project).currentSession ?: return emptyList()
+        val frame = session.currentStackFrame ?: return emptyList()
+        val dfNames = collectDataFrameNames(frame)
+        return dfNames.mapNotNull { loadDataFrameInfo(it) }
+    }
 
-        val names = try {
-            JSONArray(stripPythonStringQuotes(namesJson))
+    /**
+     * Walks the frame's variable tree and returns the names of all variables whose
+     * presentation type contains "DataFrame".
+     */
+    private fun collectDataFrameNames(frame: XStackFrame): List<String> {
+        val doneFuture = CompletableFuture<List<String>>()
+        // CopyOnWriteArrayList because addChildren + computePresentation callbacks
+        // may arrive on different threads.
+        val pending = CopyOnWriteArrayList<Pair<String, CompletableFuture<Boolean>>>()
+
+        frame.computeChildren(object : XCompositeNode {
+            override fun addChildren(children: XValueChildrenList, last: Boolean) {
+                for (i in 0 until children.size()) {
+                    val name = children.getName(i) ?: continue
+                    if (name.startsWith("_")) continue
+
+                    val isDF = CompletableFuture<Boolean>()
+                    pending.add(name to isDF)
+
+                    children.getValue(i).computePresentation(object : XValueNode {
+                        private fun resolve(type: String?, renderedValue: String) {
+                            isDF.complete(
+                                (type != null && type.contains("DataFrame")) ||
+                                renderedValue.contains("DataFrame")
+                            )
+                        }
+
+                        override fun setPresentation(
+                            icon: Icon?, type: String?, value: String, hasChildren: Boolean
+                        ) = resolve(type, value)
+
+                        override fun setPresentation(
+                            icon: Icon?, presentation: XValuePresentation, hasChildren: Boolean
+                        ) {
+                            val sb = StringBuilder()
+                            presentation.renderValue(object : XValuePresentation.XValueTextRenderer {
+                                override fun renderValue(value: String) { sb.append(value) }
+                                override fun renderValue(value: String, key: TextAttributesKey) { sb.append(value) }
+                                override fun renderStringValue(value: String) { sb.append(value) }
+                                override fun renderNumericValue(value: String) { sb.append(value) }
+                                override fun renderKeywordValue(value: String) { sb.append(value) }
+                                override fun renderComment(comment: String) {}
+                                override fun renderError(error: String) {}
+                                override fun renderSpecialSymbol(symbol: String) { sb.append(symbol) }
+                                override fun renderStringValue(
+                                    value: String, additionalSpecialCharsToHighlight: String?, maxLength: Int
+                                ) { sb.append(value) }
+                            })
+                            resolve(presentation.type, sb.toString())
+                        }
+
+                        override fun setFullValueEvaluator(e: com.intellij.xdebugger.frame.XFullValueEvaluator) {}
+                        override fun isObsolete(): Boolean = isDF.isDone
+                    }, XValuePlace.TOOLTIP)
+                }
+
+                if (last) {
+                    val names = pending.mapNotNull { (name, future) ->
+                        try {
+                            if (future.get(5_000, TimeUnit.MILLISECONDS) == true) name else null
+                        } catch (e: Exception) {
+                            LOG.warn("Timeout resolving type for variable '$name'", e)
+                            null
+                        }
+                    }
+                    doneFuture.complete(names)
+                }
+            }
+
+            override fun tooManyChildren(remaining: Int) { /* accept the first batch */ }
+            override fun setAlreadySorted(alreadySorted: Boolean) {}
+            override fun setErrorMessage(errorMessage: String) {
+                LOG.warn("computeChildren error: $errorMessage")
+                doneFuture.complete(emptyList())
+            }
+            override fun setErrorMessage(errorMessage: String, link: XDebuggerTreeNodeHyperlink?) {
+                LOG.warn("computeChildren error: $errorMessage")
+                doneFuture.complete(emptyList())
+            }
+            override fun isObsolete(): Boolean = doneFuture.isDone
+        })
+
+        return try {
+            doneFuture.get(15_000, TimeUnit.MILLISECONDS)
         } catch (e: Exception) {
-            LOG.warn("Could not parse DataFrame names JSON: $namesJson", e)
-            return emptyList()
-        }
-
-        return (0 until names.length()).mapNotNull { i ->
-            val name = names.getString(i)
-            loadDataFrameInfo(name)
+            LOG.warn("Timeout waiting for frame children: ${e.message}")
+            emptyList()
         }
     }
 
