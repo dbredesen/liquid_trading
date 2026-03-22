@@ -229,33 +229,33 @@ class DataFrameEvaluator(private val project: Project) {
      * Evaluates [expression] in the current debug frame and blocks until the result
      * is available (up to [timeoutMs] ms). Returns the raw string representation
      * of the evaluated value, or null on failure / timeout.
+     *
+     * pydevd truncates long string values in [XValueNode.setPresentation]. When that
+     * happens it also calls [XValueNode.setFullValueEvaluator] with an evaluator that
+     * can fetch the complete string. We honour that evaluator so that large JSON payloads
+     * (e.g. DataFrames with hundreds of columns) are returned untruncated.
      */
     private fun evalSync(expression: String, timeoutMs: Long = 10_000): String? {
         val session = XDebuggerManager.getInstance(project).currentSession ?: return null
         val frame = session.currentStackFrame ?: return null
         val evaluator = frame.evaluator ?: return null
 
-        val future = CompletableFuture<String?>()
+        val presentationFuture = CompletableFuture<String?>()
+        val fullValueFuture    = CompletableFuture<String?>()
+        @Volatile var fullEvalStarted = false
 
         evaluator.evaluate(expression, object : XDebuggerEvaluator.XEvaluationCallback {
             override fun evaluated(result: XValue) {
                 result.computePresentation(object : XValueNode {
-                    override fun setPresentation(
-                        icon: Icon?,
-                        type: String?,
-                        value: String,
-                        hasChildren: Boolean
-                    ) {
-                        future.complete(value)
+                    override fun setPresentation(icon: Icon?, type: String?, value: String, hasChildren: Boolean) {
+                        presentationFuture.complete(value)
                     }
 
-                    // Remaining XValueNode methods – unused but required by interface
                     override fun setPresentation(
                         icon: Icon?,
                         presentation: com.intellij.xdebugger.frame.presentation.XValuePresentation,
                         hasChildren: Boolean
                     ) {
-                        // Render via the presentation's renderValue
                         val sb = StringBuilder()
                         presentation.renderValue(object :
                             com.intellij.xdebugger.frame.presentation.XValuePresentation.XValueTextRenderer {
@@ -271,23 +271,54 @@ class DataFrameEvaluator(private val project: Project) {
                                 value: String, additionalSpecialCharsToHighlight: String?, maxLength: Int
                             ) { sb.append(value) }
                         })
-                        if (sb.isNotEmpty()) future.complete(sb.toString())
-                        else future.complete(null)
+                        presentationFuture.complete(if (sb.isNotEmpty()) sb.toString() else null)
                     }
 
-                    override fun setFullValueEvaluator(fullValueEvaluator: com.intellij.xdebugger.frame.XFullValueEvaluator) {}
-                    override fun isObsolete(): Boolean = future.isDone
+                    // Called by pydevd immediately after setPresentation when the displayed
+                    // value was truncated.  Start the full-value fetch so we can return
+                    // untruncated JSON to the caller.
+                    override fun setFullValueEvaluator(fve: com.intellij.xdebugger.frame.XFullValueEvaluator) {
+                        fullEvalStarted = true
+                        fve.startEvaluation(object :
+                            com.intellij.xdebugger.frame.XFullValueEvaluator.XFullValueEvaluationCallback {
+                            override fun evaluated(fullValue: String) { fullValueFuture.complete(fullValue) }
+                            override fun errorOccurred(msg: String)   { fullValueFuture.complete(null) }
+                        })
+                    }
+
+                    override fun isObsolete(): Boolean = presentationFuture.isDone
                 }, XValuePlace.TOOLTIP)
             }
 
             override fun errorOccurred(errorMessage: String) {
                 LOG.debug("Evaluation error for expression [$expression]: $errorMessage")
-                future.complete(null)
+                presentationFuture.complete(null)
+                fullValueFuture.complete(null)
             }
         }, null)
 
         return try {
-            future.get(timeoutMs, TimeUnit.MILLISECONDS)
+            val presented = presentationFuture.get(timeoutMs, TimeUnit.MILLISECONDS)
+            // setFullValueEvaluator is called synchronously on the same callback thread
+            // right after setPresentation returns.  A brief pause ensures fullEvalStarted
+            // is visible before we decide whether to wait for the full value.
+            Thread.sleep(50)
+            when {
+                fullValueFuture.isDone ->
+                    // Full value already available (fast path).
+                    fullValueFuture.getNow(null) ?: presented
+                fullEvalStarted ->
+                    // Full-value fetch is in-flight; wait for it.
+                    try {
+                        fullValueFuture.get(timeoutMs, TimeUnit.MILLISECONDS) ?: presented
+                    } catch (e: Exception) {
+                        LOG.warn("Full-value fetch timed out; using truncated presentation")
+                        presented
+                    }
+                else ->
+                    // Value was not truncated; use the presentation directly.
+                    presented
+            }
         } catch (e: Exception) {
             LOG.warn("Evaluation timed out or failed: ${e.message}")
             null
