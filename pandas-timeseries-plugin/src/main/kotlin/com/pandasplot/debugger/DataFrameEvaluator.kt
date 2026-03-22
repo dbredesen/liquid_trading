@@ -3,6 +3,7 @@ package com.pandasplot.debugger
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.project.Project
+import com.intellij.ui.SimpleTextAttributes
 import com.intellij.xdebugger.XDebuggerManager
 import com.intellij.xdebugger.evaluation.XDebuggerEvaluator
 import com.intellij.xdebugger.frame.XCompositeNode
@@ -15,9 +16,11 @@ import com.intellij.xdebugger.frame.XValuePlace
 import com.intellij.xdebugger.frame.presentation.XValuePresentation
 import org.json.JSONArray
 import org.json.JSONObject
+import java.awt.Font
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.Icon
 
 private val LOG = logger<DataFrameEvaluator>()
@@ -100,6 +103,7 @@ class DataFrameEvaluator(private val project: Project) {
                         }
 
                         override fun setFullValueEvaluator(e: com.intellij.xdebugger.frame.XFullValueEvaluator) {}
+                        override fun setMessage(msg: String, icon: Icon?, attrs: SimpleTextAttributes, link: XDebuggerTreeNodeHyperlink?) {}
                         override fun isObsolete(): Boolean = isDF.isDone
                     }, XValuePlace.TOOLTIP)
                 }
@@ -242,7 +246,7 @@ class DataFrameEvaluator(private val project: Project) {
 
         val presentationFuture = CompletableFuture<String?>()
         val fullValueFuture    = CompletableFuture<String?>()
-        @Volatile var fullEvalStarted = false
+        val fullEvalStarted    = AtomicBoolean(false)
 
         evaluator.evaluate(expression, object : XDebuggerEvaluator.XEvaluationCallback {
             override fun evaluated(result: XValue) {
@@ -278,14 +282,16 @@ class DataFrameEvaluator(private val project: Project) {
                     // value was truncated.  Start the full-value fetch so we can return
                     // untruncated JSON to the caller.
                     override fun setFullValueEvaluator(fve: com.intellij.xdebugger.frame.XFullValueEvaluator) {
-                        fullEvalStarted = true
+                        fullEvalStarted.set(true)
                         fve.startEvaluation(object :
                             com.intellij.xdebugger.frame.XFullValueEvaluator.XFullValueEvaluationCallback {
                             override fun evaluated(fullValue: String) { fullValueFuture.complete(fullValue) }
+                            override fun evaluated(fullValue: String, font: Font?) { fullValueFuture.complete(fullValue) }
                             override fun errorOccurred(msg: String)   { fullValueFuture.complete(null) }
                         })
                     }
 
+                    override fun setMessage(msg: String, icon: Icon?, attrs: SimpleTextAttributes, link: XDebuggerTreeNodeHyperlink?) {}
                     override fun isObsolete(): Boolean = presentationFuture.isDone
                 }, XValuePlace.TOOLTIP)
             }
@@ -307,7 +313,7 @@ class DataFrameEvaluator(private val project: Project) {
                 fullValueFuture.isDone ->
                     // Full value already available (fast path).
                     fullValueFuture.getNow(null) ?: presented
-                fullEvalStarted ->
+                fullEvalStarted.get() ->
                     // Full-value fetch is in-flight; wait for it.
                     try {
                         fullValueFuture.get(timeoutMs, TimeUnit.MILLISECONDS) ?: presented
