@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Chart background -->
+  <rect x="1" y="1" width="14" height="14" rx="1" fill="#F5F5F5" stroke="#BBBBBB" stroke-width="0.5"/>
+  <!-- Axes -->
+  <line x1="3" y1="12" x2="13" y2="12" stroke="#555555" stroke-width="0.8"/>
+  <line x1="3" y1="3" x2="3" y2="12" stroke="#555555" stroke-width="0.8"/>
+  <!-- Time series line 1 (blue) -->
+  <polyline points="3,10 5,8 7,9 9,6 11,7 13,4"
+            fill="none" stroke="#4A90D9" stroke-width="1.2" stroke-linejoin="round"/>
+  <!-- Time series line 2 (orange) -->
+  <polyline points="3,11 5,10 7,11 9,9 11,10 13,8"
+            fill="none" stroke="#E8832A" stroke-width="1.2" stroke-linejoin="round"/>
+  <!-- Data points line 1 -->
+  <circle cx="9" cy="6" r="1" fill="#4A90D9"/>
+  <circle cx="13" cy="4" r="1" fill="#4A90D9"/>
+  <!-- Data points line 2 -->
+  <circle cx="9" cy="9" r="1" fill="#E8832A"/>
+  <circle cx="13" cy="8" r="1" fill="#E8832A"/>
+</svg>

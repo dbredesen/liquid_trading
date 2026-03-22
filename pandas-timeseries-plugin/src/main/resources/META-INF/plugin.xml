@@ -1,0 +1,50 @@
+<idea-plugin>
+    <id>com.pandasplot.timeseries</id>
+    <name>Pandas Time Series Plot</name>
+    <version>1.0.0</version>
+    <vendor email="support@pandasplot.com" url="https://github.com/pandasplot">PandasPlot</vendor>
+
+    <description><![CDATA[
+        <p>Visualize Pandas DataFrame time series data at runtime while debugging Python code.</p>
+        <ul>
+            <li>Automatically detects Pandas DataFrames in the current debugger scope</li>
+            <li>Select which DataFrame to analyze</li>
+            <li>Choose a timestamp/date column for the X axis</li>
+            <li>Select one or more value columns for Y axis series</li>
+            <li>Interactive chart with zoom, pan, and tooltips</li>
+        </ul>
+        <p>Activate from the debugger toolbar when paused at a breakpoint.</p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <ul>
+            <li>1.0.0 – Initial release</li>
+        </ul>
+    ]]></change-notes>
+
+    <idea-version since-build="241" until-build="251.*"/>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>PythonCore</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Tool window shown in the debugger panel -->
+        <toolWindow id="Pandas Plot"
+                    anchor="bottom"
+                    secondary="true"
+                    factoryClass="com.pandasplot.ui.PandasPlotToolWindowFactory"
+                    icon="/icons/pandas_plot.svg"/>
+    </extensions>
+
+    <actions>
+        <!-- Action in the debugger toolbar -->
+        <action id="com.pandasplot.actions.ShowPandasPlotAction"
+                class="com.pandasplot.actions.ShowPandasPlotAction"
+                text="Plot Pandas Time Series"
+                description="Plot time series data from a Pandas DataFrame in the current debug scope"
+                icon="/icons/pandas_plot.svg">
+            <add-to-group group-id="XDebugger.ToolWindow.TopToolbar" anchor="last"/>
+            <add-to-group group-id="XDebugger.ToolWindow.TopToolbar3" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
