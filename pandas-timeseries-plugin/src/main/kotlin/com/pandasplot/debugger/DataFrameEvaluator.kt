@@ -1,6 +1,7 @@
 package com.pandasplot.debugger
 
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.project.Project
 import com.intellij.xdebugger.XDebuggerManager
 import com.intellij.xdebugger.evaluation.XDebuggerEvaluator
@@ -177,6 +178,7 @@ class DataFrameEvaluator(private val project: Project) {
                         presentation.renderValue(object :
                             com.intellij.xdebugger.frame.presentation.XValuePresentation.XValueTextRenderer {
                             override fun renderValue(value: String) { sb.append(value) }
+                            override fun renderValue(value: String, textAttributes: TextAttributesKey) { sb.append(value) }
                             override fun renderStringValue(value: String) { sb.append(value) }
                             override fun renderNumericValue(value: String) { sb.append(value) }
                             override fun renderKeywordValue(value: String) { sb.append(value) }

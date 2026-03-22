@@ -148,7 +148,7 @@ class TimeSeriesChartPanel : JPanel(BorderLayout()) {
         plot.backgroundPaint = Color(0xF8F8F8)
         plot.domainGridlinePaint = Color(0xDDDDDD)
         plot.rangeGridlinePaint = Color(0xDDDDDD)
-        plot.outlineVisible = false
+        plot.isOutlineVisible = false
         plot.insets = RectangleInsets(4.0, 4.0, 4.0, 4.0)
 
         // Style axes
