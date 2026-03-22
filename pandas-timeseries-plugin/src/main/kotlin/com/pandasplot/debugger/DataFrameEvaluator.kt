@@ -103,7 +103,6 @@ class DataFrameEvaluator(private val project: Project) {
                         }
 
                         override fun setFullValueEvaluator(e: com.intellij.xdebugger.frame.XFullValueEvaluator) {}
-                        override fun setMessage(msg: String, icon: Icon?, attrs: SimpleTextAttributes, link: XDebuggerTreeNodeHyperlink?) {}
                         override fun isObsolete(): Boolean = isDF.isDone
                     }, XValuePlace.TOOLTIP)
                 }
@@ -123,6 +122,7 @@ class DataFrameEvaluator(private val project: Project) {
 
             override fun tooManyChildren(remaining: Int) { /* accept the first batch */ }
             override fun setAlreadySorted(alreadySorted: Boolean) {}
+            override fun setMessage(msg: String, icon: Icon?, attrs: SimpleTextAttributes, link: XDebuggerTreeNodeHyperlink?) {}
             override fun setErrorMessage(errorMessage: String) {
                 LOG.warn("computeChildren error: $errorMessage")
                 doneFuture.complete(emptyList())
@@ -291,7 +291,6 @@ class DataFrameEvaluator(private val project: Project) {
                         })
                     }
 
-                    override fun setMessage(msg: String, icon: Icon?, attrs: SimpleTextAttributes, link: XDebuggerTreeNodeHyperlink?) {}
                     override fun isObsolete(): Boolean = presentationFuture.isDone
                 }, XValuePlace.TOOLTIP)
             }
